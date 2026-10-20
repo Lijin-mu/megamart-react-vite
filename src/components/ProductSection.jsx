@@ -1,8 +1,7 @@
-import { products } from '../data/storeData.js';
 import SectionTitle from './SectionTitle.jsx';
 import ProductCard from './ProductCard.jsx';
 
-export default function ProductSection({ onAdd }) {
+export default function ProductSection({ products, onAdd }) {
   return (
     <section className="content-section">
       <SectionTitle title="Grab the best deal on" accent="Smartphones" to="/products" />

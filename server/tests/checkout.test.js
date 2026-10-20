@@ -71,7 +71,13 @@ test('account, persistent cart, COD checkout, and order history work end to end'
   const startServer = () =>
     spawn(process.execPath, ['server/index.js'], {
       cwd: projectDirectory,
-      env: { ...process.env, API_PORT: String(port), DATABASE_PATH: databasePath },
+      env: {
+        ...process.env,
+        API_PORT: String(port),
+        DATABASE_PATH: databasePath,
+        ADMIN_EMAIL: 'admin@example.test',
+        ADMIN_PASSWORD: 'admin-password-2026',
+      },
       stdio: 'ignore',
     });
   serverProcess = startServer();
@@ -84,6 +90,81 @@ test('account, persistent cart, COD checkout, and order history work end to end'
   });
   await waitForApi();
 
+  const catalog = await request('/api/products');
+  assert.equal(catalog.status, 200);
+  assert.ok(catalog.body.products.some((product) => product.id === 'galaxy-s22-ultra'));
+  const catalogCategories = await request('/api/categories');
+  assert.ok(catalogCategories.body.categories.some((category) => category.id === 'mobile'));
+  assert.equal((await request('/api/admin/products')).status, 401);
+
+  const adminLogin = await request('/api/auth/login', {
+    method: 'POST',
+    body: { email: 'admin@example.test', password: 'admin-password-2026' },
+  });
+  assert.equal(adminLogin.status, 200);
+  assert.equal(adminLogin.body.user.role, 'admin');
+  assert.equal((await request('/api/auth/me')).body.user.role, 'admin');
+  const createdCategory = await request('/api/admin/categories', {
+    method: 'POST',
+    body: {
+      id: 'test-category',
+      name: 'Test Category',
+      image: 'https://example.test/category.jpg',
+    },
+  });
+  assert.equal(createdCategory.status, 201);
+  const updatedCategory = await request('/api/admin/categories/test-category', {
+    method: 'PUT',
+    body: {
+      ...createdCategory.body.category,
+      name: 'Updated Test Category',
+    },
+  });
+  assert.equal(updatedCategory.status, 200);
+  assert.equal(updatedCategory.body.category.name, 'Updated Test Category');
+  const createdProduct = await request('/api/admin/products', {
+    method: 'POST',
+    body: {
+      id: 'test-catalog-product',
+      name: 'Catalog Test Product',
+      price: 1200,
+      old: 1500,
+      save: '₹300',
+      image: 'https://example.test/product.jpg',
+      tag: '20% OFF',
+      description: 'A product used to verify catalog management.',
+      storage: 'Standard',
+      categoryId: 'test-category',
+    },
+  });
+  assert.equal(createdProduct.status, 201);
+  assert.equal((await request('/api/products/test-catalog-product')).body.product.price, 1200);
+  const updatedProduct = await request('/api/admin/products/test-catalog-product', {
+    method: 'PUT',
+    body: { ...createdProduct.body.product, price: 1100 },
+  });
+  assert.equal(updatedProduct.status, 200);
+  assert.equal(updatedProduct.body.product.price, 1100);
+  assert.equal(
+    (await request('/api/admin/categories/test-category', {
+      method: 'DELETE',
+    })).status,
+    409,
+  );
+  assert.equal(
+    (await request('/api/admin/products/test-catalog-product', {
+      method: 'DELETE',
+    })).status,
+    204,
+  );
+  assert.equal(
+    (await request('/api/admin/categories/test-category', {
+      method: 'DELETE',
+    })).status,
+    204,
+  );
+  assert.equal((await request('/api/auth/logout', { method: 'POST' })).status, 204);
+
   const email = `checkout-${process.pid}@example.test`;
   const registration = await request('/api/auth/register', {
     method: 'POST',
@@ -92,6 +173,8 @@ test('account, persistent cart, COD checkout, and order history work end to end'
   assert.equal(registration.status, 201);
   assert.equal(registration.body.user.email, email);
   assert.ok(cookies.has('mm_session'));
+  assert.equal((await request('/api/auth/me')).body.user.role, 'customer');
+  assert.equal((await request('/api/admin/products')).status, 403);
 
   const emptyAddresses = await request('/api/account/addresses');
   assert.equal(emptyAddresses.status, 200);

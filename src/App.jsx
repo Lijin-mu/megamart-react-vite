@@ -16,13 +16,17 @@ import CartPage from './pages/CartPage.jsx';
 import CheckoutPage from './pages/CheckoutPage.jsx';
 import OrderConfirmationPage from './pages/OrderConfirmationPage.jsx';
 import OrderDetailsPage from './pages/OrderDetailsPage.jsx';
+import AdminDashboardPage from './pages/AdminDashboardPage.jsx';
 
 export default function App() {
   const [cart, setCart] = useState(null);
   const [currentUser, setCurrentUser] = useState(null);
+  const [products, setProducts] = useState([]);
+  const [categories, setCategories] = useState([]);
   const [cartOpen, setCartOpen] = useState(false);
   const [apiError, setApiError] = useState('');
   const [authReady, setAuthReady] = useState(false);
+  const [catalogReady, setCatalogReady] = useState(false);
 
   useEffect(() => {
     Promise.all([api.getCart(), api.currentUser()])
@@ -32,6 +36,13 @@ export default function App() {
       })
       .catch((error) => setApiError(error.message))
       .finally(() => setAuthReady(true));
+    Promise.all([api.products(), api.categories()])
+      .then(([productData, categoryData]) => {
+        setProducts(productData.products);
+        setCategories(categoryData.categories);
+      })
+      .catch((error) => setApiError(error.message))
+      .finally(() => setCatalogReady(true));
   }, []);
 
   async function addToCart(product) {
@@ -65,11 +76,18 @@ export default function App() {
     setCart(cartData);
   }
 
+  async function refreshCatalog() {
+    const [productData, categoryData] = await Promise.all([api.products(), api.categories()]);
+    setProducts(productData.products);
+    setCategories(categoryData.categories);
+  }
+
   return (
     <>
       <Header
         cartCount={cart?.totalItems ?? 0}
         currentUser={currentUser}
+        products={products}
         onCart={() => setCartOpen(true)}
       />
       {apiError && (
@@ -86,15 +104,46 @@ export default function App() {
           element={
             <main className="container">
               <Hero />
-              <ProductSection onAdd={addToCart} />
-              <Categories />
+              <ProductSection products={products} onAdd={addToCart} />
+              <Categories categories={categories} />
               <BrandSection />
               <Essentials />
             </main>
           }
         />
-        <Route path="/products" element={<ProductListingPage onAdd={addToCart} />} />
-        <Route path="/products/:productId" element={<ProductDetailPage onAdd={addToCart} />} />
+        <Route
+          path="/products"
+          element={
+            <ProductListingPage
+              products={products}
+              categories={categories}
+              catalogReady={catalogReady}
+              onAdd={addToCart}
+            />
+          }
+        />
+        <Route
+          path="/products/:productId"
+          element={
+            <ProductDetailPage
+              products={products}
+              categories={categories}
+              catalogReady={catalogReady}
+              onAdd={addToCart}
+            />
+          }
+        />
+        <Route
+          path="/admin"
+          element={
+            <AdminDashboardPage
+              currentUser={currentUser}
+              authReady={authReady}
+              onUserChange={setCurrentUser}
+              onCatalogChange={refreshCatalog}
+            />
+          }
+        />
         <Route
           path="/cart"
           element={

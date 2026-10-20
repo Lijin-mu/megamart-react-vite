@@ -4,7 +4,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import bcrypt from 'bcryptjs';
 import express from 'express';
-import { products } from '../src/data/storeData.js';
+import { categories, imageUrl, products } from '../src/data/storeData.js';
 import { openDatabase } from './database.js';
 
 const serverDirectory = dirname(fileURLToPath(import.meta.url));
@@ -20,6 +20,7 @@ database.exec(`
     name TEXT NOT NULL,
     email TEXT NOT NULL UNIQUE COLLATE NOCASE,
     password_hash TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'customer',
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   );
   CREATE TABLE IF NOT EXISTS sessions (
@@ -58,13 +59,90 @@ database.exec(`
     same_as_resident INTEGER NOT NULL DEFAULT 0 CHECK (same_as_resident IN (0, 1)),
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   );
+  CREATE TABLE IF NOT EXISTS categories (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    image TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS products (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    price INTEGER NOT NULL CHECK (price >= 0),
+    old INTEGER NOT NULL CHECK (old >= 0),
+    save TEXT NOT NULL,
+    image TEXT NOT NULL,
+    tag TEXT NOT NULL,
+    description TEXT NOT NULL,
+    storage TEXT NOT NULL,
+    category_id TEXT NOT NULL REFERENCES categories(id) ON UPDATE CASCADE
+  );
 `);
+
+if (!database.prepare('PRAGMA table_info(users)').all().some((column) => column.name === 'role')) {
+  database.exec("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'customer'");
+}
+
+if (database.prepare('SELECT COUNT(*) AS count FROM categories').get().count === 0) {
+  const insertCategory = database.prepare(
+    'INSERT INTO categories (id, name, image) VALUES (?, ?, ?)',
+  );
+  for (const [name, image] of categories) {
+    const id = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    insertCategory.run(id, name, imageUrl(image, 240));
+  }
+}
+
+if (database.prepare('SELECT COUNT(*) AS count FROM products').get().count === 0) {
+  const insertProduct = database.prepare(`
+    INSERT INTO products (id, name, price, old, save, image, tag, description, storage, category_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  for (const product of products) {
+    insertProduct.run(
+      product.id,
+      product.name,
+      product.price,
+      product.old,
+      product.save,
+      product.image,
+      product.tag,
+      product.description,
+      product.storage,
+      'mobile',
+    );
+  }
+}
+
+const adminEmailSetting = process.env.ADMIN_EMAIL;
+const adminEmail = adminEmailSetting?.trim().toLowerCase();
+const adminPassword = process.env.ADMIN_PASSWORD;
+if (adminEmailSetting !== undefined || adminPassword !== undefined) {
+  if (
+    !adminEmail ||
+    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(adminEmail) ||
+    typeof adminPassword !== 'string' ||
+    adminPassword.length < 10 ||
+    adminPassword.length > 128
+  ) {
+    throw new Error('Set a valid ADMIN_EMAIL and an ADMIN_PASSWORD between 10 and 128 characters.');
+  }
+  const existingAdmin = database.prepare('SELECT id FROM users WHERE email = ?').get(adminEmail);
+  if (existingAdmin) {
+    database.prepare("UPDATE users SET role = 'admin' WHERE id = ?").run(existingAdmin.id);
+  } else {
+    database
+      .prepare(`
+        INSERT INTO users (id, name, email, password_hash, role)
+        VALUES (?, 'MegaMart Admin', ?, ?, 'admin')
+      `)
+      .run(randomUUID(), adminEmail, await bcrypt.hash(adminPassword, 12));
+  }
+}
 
 const app = express();
 const port = Number(process.env.API_PORT ?? 3001);
 const isProduction = process.env.NODE_ENV === 'production';
 const cookieOptions = `Path=/; HttpOnly; SameSite=Lax${isProduction ? '; Secure' : ''}`;
-const productById = new Map(products.map((product) => [product.id, product]));
 const authAttempts = new Map();
 
 app.disable('x-powered-by');
@@ -108,7 +186,12 @@ function setSessionCookie(response, userId) {
 }
 
 function publicUser(user) {
-  return { id: user.id, name: user.name, email: user.email };
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    ...(user.role ? { role: user.role } : {}),
+  };
 }
 
 function requireUser(request, response, next) {
@@ -119,7 +202,7 @@ function requireUser(request, response, next) {
 
   const session = database
     .prepare(`
-      SELECT users.id, users.name, users.email, sessions.token_hash
+      SELECT users.id, users.name, users.email, users.role, sessions.token_hash
       FROM sessions JOIN users ON users.id = sessions.user_id
       WHERE sessions.token_hash = ? AND sessions.expires_at > ?
     `)
@@ -132,6 +215,13 @@ function requireUser(request, response, next) {
 
   request.user = publicUser(session);
   request.sessionTokenHash = session.token_hash;
+  return next();
+}
+
+function requireAdmin(request, response, next) {
+  if (request.user.role !== 'admin') {
+    return response.status(403).json({ error: 'Administrator access is required.' });
+  }
   return next();
 }
 
@@ -152,17 +242,59 @@ function limitAuthAttempts(request, response, next) {
 
 function getCart(cartId) {
   const rows = database
-    .prepare('SELECT product_id, quantity FROM cart_lines WHERE cart_id = ? ORDER BY rowid')
+    .prepare(`
+      SELECT products.*, products.category_id AS categoryId, cart_lines.quantity
+      FROM cart_lines JOIN products ON products.id = cart_lines.product_id
+      WHERE cart_lines.cart_id = ? ORDER BY cart_lines.rowid
+    `)
     .all(cartId);
-  const items = rows.flatMap(({ product_id: productId, quantity }) => {
-    const product = productById.get(productId);
-    return product ? [{ ...product, quantity }] : [];
-  });
+  const items = rows;
   return {
     items,
     totalItems: items.reduce((sum, item) => sum + item.quantity, 0),
     total: items.reduce((sum, item) => sum + item.price * item.quantity, 0),
   };
+}
+
+function productFromRow(row) {
+  if (!row) return null;
+  const { category_id: categoryId = row.categoryId, ...product } = row;
+  return { ...product, categoryId };
+}
+
+function validProduct(product) {
+  return (
+    product &&
+    typeof product === 'object' &&
+    !Array.isArray(product) &&
+    validText(product.id, 80) &&
+    /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(product.id) &&
+    validText(product.name, 160) &&
+    Number.isSafeInteger(product.price) &&
+    product.price >= 0 &&
+    Number.isSafeInteger(product.old) &&
+    product.old >= 0 &&
+    validText(product.save, 40) &&
+    validText(product.image, 1000) &&
+    /^https?:\/\//i.test(product.image) &&
+    validText(product.tag, 40) &&
+    validText(product.description, 2000) &&
+    validText(product.storage, 80) &&
+    validText(product.categoryId, 80)
+  );
+}
+
+function validCategory(category) {
+  return (
+    category &&
+    typeof category === 'object' &&
+    !Array.isArray(category) &&
+    validText(category.id, 80) &&
+    /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(category.id) &&
+    validText(category.name, 80) &&
+    validText(category.image, 1000) &&
+    /^https?:\/\//i.test(category.image)
+  );
 }
 
 function validText(value, maximum = 120) {
@@ -196,6 +328,185 @@ function normalizeAddress(address, { includeRecipient = true } = {}) {
 }
 
 app.get('/api/health', (_request, response) => response.json({ status: 'ok' }));
+
+app.get('/api/categories', (_request, response) => {
+  const rows = database
+    .prepare('SELECT id, name, image FROM categories ORDER BY name COLLATE NOCASE')
+    .all();
+  response.json({ categories: rows });
+});
+
+app.get('/api/products', (_request, response) => {
+  const rows = database
+    .prepare(`
+      SELECT id, name, price, old, save, image, tag, description, storage,
+        category_id AS categoryId
+      FROM products ORDER BY rowid
+    `)
+    .all();
+  response.json({ products: rows });
+});
+
+app.get('/api/products/:productId', (request, response) => {
+  const product = database
+    .prepare(`
+      SELECT id, name, price, old, save, image, tag, description, storage,
+        category_id AS categoryId
+      FROM products WHERE id = ?
+    `)
+    .get(request.params.productId);
+  if (!product) return response.status(404).json({ error: 'Product not found.' });
+  return response.json({ product });
+});
+
+app.get('/api/admin/products', requireUser, requireAdmin, (_request, response) => {
+  const rows = database
+    .prepare(`
+      SELECT id, name, price, old, save, image, tag, description, storage,
+        category_id AS categoryId
+      FROM products ORDER BY rowid
+    `)
+    .all();
+  response.json({ products: rows });
+});
+
+app.post('/api/admin/products', requireUser, requireAdmin, (request, response, next) => {
+  const product = request.body;
+  if (!validProduct(product)) {
+    return response.status(400).json({ error: 'Enter all product fields with valid values.' });
+  }
+  if (!database.prepare('SELECT id FROM categories WHERE id = ?').get(product.categoryId)) {
+    return response.status(400).json({ error: 'Choose an existing product category.' });
+  }
+  try {
+    database
+      .prepare(`
+        INSERT INTO products
+          (id, name, price, old, save, image, tag, description, storage, category_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `)
+      .run(
+        product.id,
+        product.name.trim(),
+        product.price,
+        product.old,
+        product.save.trim(),
+        product.image.trim(),
+        product.tag.trim(),
+        product.description.trim(),
+        product.storage.trim(),
+        product.categoryId,
+      );
+    return response.status(201).json({ product: productFromRow(product) });
+  } catch (error) {
+    if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') {
+      return response.status(409).json({ error: 'A product with that ID already exists.' });
+    }
+    return next(error);
+  }
+});
+
+app.put('/api/admin/products/:productId', requireUser, requireAdmin, (request, response, next) => {
+  const product = request.body;
+  if (!validProduct(product) || product.id !== request.params.productId) {
+    return response.status(400).json({ error: 'Enter all product fields and keep the product ID unchanged.' });
+  }
+  if (!database.prepare('SELECT id FROM categories WHERE id = ?').get(product.categoryId)) {
+    return response.status(400).json({ error: 'Choose an existing product category.' });
+  }
+  const result = database
+    .prepare(`
+      UPDATE products SET name = ?, price = ?, old = ?, save = ?, image = ?, tag = ?,
+        description = ?, storage = ?, category_id = ?
+      WHERE id = ?
+    `)
+    .run(
+      product.name.trim(),
+      product.price,
+      product.old,
+      product.save.trim(),
+      product.image.trim(),
+      product.tag.trim(),
+      product.description.trim(),
+      product.storage.trim(),
+      product.categoryId,
+      product.id,
+    );
+  if (!result.changes) return response.status(404).json({ error: 'Product not found.' });
+  return response.json({ product: productFromRow(product) });
+});
+
+app.delete('/api/admin/products/:productId', requireUser, requireAdmin, (request, response) => {
+  const removeProduct = database.transaction(() => {
+    database.prepare('DELETE FROM cart_lines WHERE product_id = ?').run(request.params.productId);
+    return database.prepare('DELETE FROM products WHERE id = ?').run(request.params.productId);
+  });
+  if (!removeProduct().changes) return response.status(404).json({ error: 'Product not found.' });
+  return response.status(204).end();
+});
+
+app.get('/api/admin/categories', requireUser, requireAdmin, (_request, response) => {
+  const rows = database
+    .prepare('SELECT id, name, image FROM categories ORDER BY name COLLATE NOCASE')
+    .all();
+  response.json({ categories: rows });
+});
+
+app.post('/api/admin/categories', requireUser, requireAdmin, (request, response, next) => {
+  const category = request.body;
+  if (!validCategory(category)) {
+    return response.status(400).json({ error: 'Enter a valid category ID, name, and image URL.' });
+  }
+  try {
+    database
+      .prepare('INSERT INTO categories (id, name, image) VALUES (?, ?, ?)')
+      .run(category.id, category.name.trim(), category.image.trim());
+    return response.status(201).json({
+      category: { id: category.id, name: category.name.trim(), image: category.image.trim() },
+    });
+  } catch (error) {
+    if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') {
+      return response.status(409).json({ error: 'A category with that ID or name already exists.' });
+    }
+    return next(error);
+  }
+});
+
+app.put('/api/admin/categories/:categoryId', requireUser, requireAdmin, (request, response, next) => {
+  const category = request.body;
+  if (!validCategory(category) || category.id !== request.params.categoryId) {
+    return response.status(400).json({ error: 'Enter valid category fields and keep the category ID unchanged.' });
+  }
+  try {
+    const result = database
+      .prepare('UPDATE categories SET name = ?, image = ? WHERE id = ?')
+      .run(category.name.trim(), category.image.trim(), category.id);
+    if (!result.changes) return response.status(404).json({ error: 'Category not found.' });
+    return response.json({
+      category: { id: category.id, name: category.name.trim(), image: category.image.trim() },
+    });
+  } catch (error) {
+    if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') {
+      return response.status(409).json({ error: 'A category with that name already exists.' });
+    }
+    return next(error);
+  }
+});
+
+app.delete('/api/admin/categories/:categoryId', requireUser, requireAdmin, (request, response) => {
+  if (
+    database
+      .prepare('SELECT 1 FROM products WHERE category_id = ? LIMIT 1')
+      .get(request.params.categoryId)
+  ) {
+    return response.status(409).json({ error: 'Move or delete this category’s products first.' });
+  }
+  const result = database
+    .prepare('DELETE FROM categories WHERE id = ?')
+    .run(request.params.categoryId);
+  if (!result.changes) return response.status(404).json({ error: 'Category not found.' });
+  return response.status(204).end();
+});
 
 app.post('/api/auth/register', limitAuthAttempts, async (request, response, next) => {
   const { name, email, password } = request.body ?? {};
@@ -254,7 +565,7 @@ app.get('/api/auth/me', (request, response) => {
   if (!token || !/^[\w-]{40,50}$/.test(token)) return response.json({ user: null });
   const session = database
     .prepare(`
-      SELECT users.id, users.name, users.email
+      SELECT users.id, users.name, users.email, users.role
       FROM sessions JOIN users ON users.id = sessions.user_id
       WHERE sessions.token_hash = ? AND sessions.expires_at > ?
     `)
@@ -336,7 +647,7 @@ app.get('/api/cart', (request, response) => {
 
 app.post('/api/cart', (request, response) => {
   const { productId, quantity = 1 } = request.body ?? {};
-  if (!productById.has(productId)) {
+  if (!database.prepare('SELECT id FROM products WHERE id = ?').get(productId)) {
     return response.status(404).json({ error: 'That product is no longer available.' });
   }
   if (!Number.isInteger(quantity) || quantity < 1 || quantity > 99) {
@@ -356,7 +667,7 @@ app.post('/api/cart', (request, response) => {
 app.patch('/api/cart/:productId', (request, response) => {
   const { productId } = request.params;
   const { quantity } = request.body ?? {};
-  if (!productById.has(productId)) {
+  if (!database.prepare('SELECT id FROM products WHERE id = ?').get(productId)) {
     return response.status(404).json({ error: 'That product is no longer available.' });
   }
   if (!Number.isInteger(quantity) || quantity < 0 || quantity > 99) {

@@ -1,13 +1,22 @@
 import { useState } from 'react';
 import { ArrowLeft, Check, ShoppingCart, Truck } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
-import { products } from '../data/storeData.js';
 import ProductCard from '../components/ProductCard.jsx';
 
-export default function ProductDetailPage({ onAdd }) {
+export default function ProductDetailPage({ products, categories, catalogReady, onAdd }) {
   const { productId } = useParams();
   const product = products.find((item) => item.id === productId);
+  const category = categories.find((item) => item.id === product?.categoryId);
   const [added, setAdded] = useState(false);
+
+  if (!catalogReady) {
+    return (
+      <main className="container not-found-page">
+        <p className="eyebrow">MEGAMART CATALOG</p>
+        <h1>Loading product…</h1>
+      </main>
+    );
+  }
 
   if (!product) {
     return (
@@ -46,7 +55,7 @@ export default function ProductDetailPage({ onAdd }) {
           <img className="detail-image" src={product.image} alt={product.name} />
         </div>
         <div className="detail-info">
-          <p className="eyebrow">MEGAMART SMARTPHONES</p>
+          <p className="eyebrow">MEGAMART {category?.name?.toUpperCase() ?? 'PRODUCTS'}</p>
           <h1>{product.name}</h1>
           <div className="detail-rating" aria-label="Rated 4.8 out of 5">
             <span>★★★★★</span> <b>4.8</b> <span className="rating-reviews">· 126 reviews</span>
@@ -81,7 +90,7 @@ export default function ProductDetailPage({ onAdd }) {
         <dl>
           <div>
             <dt>Category</dt>
-            <dd>Smartphones</dd>
+            <dd>{category?.name ?? 'Products'}</dd>
           </div>
           <div>
             <dt>Storage</dt>

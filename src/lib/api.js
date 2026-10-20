@@ -15,6 +15,29 @@ async function request(path, options = {}) {
 }
 
 export const api = {
+  products: () => request('/products'),
+  product: (productId) => request(`/products/${encodeURIComponent(productId)}`),
+  categories: () => request('/categories'),
+  adminProducts: () => request('/admin/products'),
+  createProduct: (product) =>
+    request('/admin/products', { method: 'POST', body: JSON.stringify(product) }),
+  updateProduct: (productId, product) =>
+    request(`/admin/products/${encodeURIComponent(productId)}`, {
+      method: 'PUT',
+      body: JSON.stringify(product),
+    }),
+  deleteProduct: (productId) =>
+    request(`/admin/products/${encodeURIComponent(productId)}`, { method: 'DELETE' }),
+  adminCategories: () => request('/admin/categories'),
+  createCategory: (category) =>
+    request('/admin/categories', { method: 'POST', body: JSON.stringify(category) }),
+  updateCategory: (categoryId, category) =>
+    request(`/admin/categories/${encodeURIComponent(categoryId)}`, {
+      method: 'PUT',
+      body: JSON.stringify(category),
+    }),
+  deleteCategory: (categoryId) =>
+    request(`/admin/categories/${encodeURIComponent(categoryId)}`, { method: 'DELETE' }),
   currentUser: () => request('/auth/me'),
   register: (details) =>
     request('/auth/register', { method: 'POST', body: JSON.stringify(details) }),

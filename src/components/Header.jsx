@@ -11,7 +11,6 @@ import {
   UserRound,
 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
-import { products } from '../data/storeData.js';
 
 const navigationItems = [
   'Groceries',
@@ -24,7 +23,7 @@ const navigationItems = [
   'Sports, Toys & Luggage',
 ];
 
-export default function Header({ cartCount, currentUser, onCart }) {
+export default function Header({ cartCount, currentUser, products, onCart }) {
   const [search, setSearch] = useState('');
   const [searchFocused, setSearchFocused] = useState(false);
   const [activeSuggestion, setActiveSuggestion] = useState(-1);
@@ -184,6 +183,11 @@ export default function Header({ cartCount, currentUser, onCart }) {
             <UserRound />
             <span>{currentUser ? currentUser.name : 'Sign Up/Sign In'}</span>
           </Link>
+          {currentUser?.role === 'admin' && (
+            <Link className="action-link" to="/admin">
+              <span>Admin dashboard</span>
+            </Link>
+          )}
           <i />
           <button className="action-link" onClick={onCart}>
             <ShoppingCart />

@@ -85,7 +85,8 @@ function AccountAddressForm({ title, icon: Icon, address, onChange, disabled }) 
 }
 
 export default function AccountPage({ currentUser, onUserChange, cart, authReady }) {
-  const [mode, setMode] = useState('register');
+  const location = useLocation();
+  const [mode, setMode] = useState(location.state?.from === '/admin' ? 'login' : 'register');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -102,7 +103,6 @@ export default function AccountPage({ currentUser, onUserChange, cart, authReady
   const [addressError, setAddressError] = useState('');
   const [addressMessage, setAddressMessage] = useState('');
   const [savingAddresses, setSavingAddresses] = useState(false);
-  const location = useLocation();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -177,9 +177,10 @@ export default function AccountPage({ currentUser, onUserChange, cart, authReady
           ? await api.register({ name, email, password })
           : await api.login({ email, password });
       onUserChange(result.user);
-      navigate(location.state?.from === '/checkout' ? '/checkout' : '/account', {
-        replace: true,
-      });
+      const returnPath = ['/checkout', '/admin'].includes(location.state?.from)
+        ? location.state.from
+        : '/account';
+      navigate(returnPath, { replace: true });
     } catch (requestError) {
       setError(requestError.message);
     } finally {

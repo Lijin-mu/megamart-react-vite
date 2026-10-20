@@ -35,6 +35,45 @@ Accounts use bcrypt password hashes and seven-day HttpOnly sessions. The
 checkout stores the selected address and confirms a COD order; it does not
 collect payment card details or process online payments.
 
+## Catalog management API
+
+Products and categories are stored in SQLite and served by the API. Public
+catalog endpoints are `GET /api/products`, `GET /api/products/:productId`,
+and `GET /api/categories`. The storefront loads its product and category data
+from these endpoints.
+
+Admin catalog endpoints require a signed-in admin session:
+
+- `GET`, `POST /api/admin/products`
+- `PUT`, `DELETE /api/admin/products/:productId`
+- `GET`, `POST /api/admin/categories`
+- `PUT`, `DELETE /api/admin/categories/:categoryId`
+
+Product records use `id`, `name`, `price`, `old`, `save`, `image`, `tag`,
+`description`, `storage`, and `categoryId`. Category records use `id`, `name`,
+and `image`. IDs are lowercase URL-safe slugs, prices are integer rupee
+amounts for the current storefront, and image values must be
+HTTP or HTTPS URLs.
+
+Set `ADMIN_EMAIL` and `ADMIN_PASSWORD` when starting the server to create the
+initial admin account if it does not exist, or promote an existing account with
+that email. Passwords must be 10–128 characters. Keep these values private;
+the password is only used to create a new admin account and is not reset when
+an existing account is promoted. Admins can use the endpoints with the normal
+`/api/auth/login` session cookie. Category deletion is rejected while products
+still reference that category.
+
+After starting the server, sign in with the admin account in the storefront and
+open `http://localhost:5173/admin` during development, or `/admin` on the
+production site. The dashboard provides forms to add, edit, and delete
+products and categories.
+
+For local development, start the storefront and API together with:
+
+```sh
+ADMIN_EMAIL=admin@example.com ADMIN_PASSWORD='use-a-private-password' npm run dev
+```
+
 ## Production
 
 ```sh
