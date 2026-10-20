@@ -15,6 +15,7 @@ import AccountPage from './pages/AccountPage.jsx';
 import CartPage from './pages/CartPage.jsx';
 import CheckoutPage from './pages/CheckoutPage.jsx';
 import OrderConfirmationPage from './pages/OrderConfirmationPage.jsx';
+import OrderDetailsPage from './pages/OrderDetailsPage.jsx';
 
 export default function App() {
   const [cart, setCart] = useState(null);
@@ -105,7 +106,7 @@ export default function App() {
           }
         />
         <Route
-          path="/account"
+          path="/account/*"
           element={
             <AccountPage
               currentUser={currentUser}
@@ -114,6 +115,10 @@ export default function App() {
               cart={cart}
             />
           }
+        />
+        <Route
+          path="/account/orders/:orderNumber"
+          element={<OrderDetailsPage currentUser={currentUser} authReady={authReady} />}
         />
         <Route
           path="/checkout"

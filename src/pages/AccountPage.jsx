@@ -221,6 +221,18 @@ export default function AccountPage({ currentUser, onUserChange, cart, authReady
             </button>
           </div>
           {error && <p className="form-error" role="alert">{error}</p>}
+          <nav className="account-navigation" aria-label="Account pages">
+            <Link className={location.pathname === '/account' ? 'active' : ''} to="/account">
+              <UserRound size={16} /> Overview
+            </Link>
+            <Link className={location.pathname === '/account/addresses' ? 'active' : ''} to="/account/addresses">
+              <MapPin size={16} /> Addresses
+            </Link>
+            <Link className={location.pathname === '/account/orders' ? 'active' : ''} to="/account/orders">
+              <PackageCheck size={16} /> Orders
+            </Link>
+          </nav>
+          {location.pathname === '/account/addresses' && (
           <section className="account-panel saved-addresses-panel">
             <div className="account-panel-heading">
               <h2><MapPin size={19} /> Saved addresses</h2>
@@ -272,7 +284,8 @@ export default function AccountPage({ currentUser, onUserChange, cart, authReady
               </form>
             )}
           </section>
-          <div className="account-panel">
+          )}
+          {location.pathname === '/account/orders' && <div className="account-panel">
             <div className="account-panel-heading">
               <h2><PackageCheck size={20} /> Your orders</h2>
               <Link to="/products">Continue shopping <ArrowRight size={14} /></Link>
@@ -289,16 +302,45 @@ export default function AccountPage({ currentUser, onUserChange, cart, authReady
                   <article className="order-history-item" key={order.id}>
                     <div>
                       <strong>{order.orderNumber}</strong>
-                      <span>{order.items.length} product{order.items.length === 1 ? '' : 's'}</span>
+                      <span>{new Date(order.createdAt).toLocaleDateString('en-IN')} · {order.items.length} product{order.items.length === 1 ? '' : 's'}</span>
                     </div>
                     <span className="order-status">{order.status}</span>
-                    <strong>₹{order.total.toLocaleString('en-IN')}</strong>
+                    <div className="order-history-total">
+                      <strong>₹{order.total.toLocaleString('en-IN')}</strong>
+                      <Link to={`/account/orders/${encodeURIComponent(order.orderNumber)}`}>View details <ArrowRight size={13} /></Link>
+                    </div>
                   </article>
                 ))}
               </div>
             )}
-          </div>
-          {cart?.totalItems > 0 && (
+          </div>}
+          {location.pathname === '/account' && (
+            <>
+              <section className="account-overview">
+                <div className="account-overview-intro">
+                  <p className="eyebrow">YOUR MEGAMART</p>
+                  <h2>Everything you need, in one place.</h2>
+                  <p>Manage your details, keep delivery addresses up to date, and follow your orders.</p>
+                </div>
+                <div className="account-overview-links">
+                  <Link className="account-overview-card" to="/account/addresses">
+                    <MapPin size={20} />
+                    <strong>Saved addresses</strong>
+                    <span>Manage your delivery details</span>
+                    <ArrowRight size={16} />
+                  </Link>
+                  <Link className="account-overview-card" to="/account/orders">
+                    <PackageCheck size={20} />
+                    <strong>Your orders</strong>
+                    <span>{orders.length} order{orders.length === 1 ? '' : 's'} · View tracking and invoices</span>
+                    <ArrowRight size={16} />
+                  </Link>
+                </div>
+              </section>
+              {ordersError && <p className="form-error" role="alert">{ordersError}</p>}
+            </>
+          )}
+          {location.pathname === '/account' && cart?.totalItems > 0 && (
             <Link className="account-cart-reminder" to="/cart">
               You have {cart.totalItems} item{cart.totalItems === 1 ? '' : 's'} in your cart
               <ArrowRight size={16} />
