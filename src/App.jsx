@@ -17,6 +17,7 @@ import CheckoutPage from './pages/CheckoutPage.jsx';
 import OrderConfirmationPage from './pages/OrderConfirmationPage.jsx';
 import OrderDetailsPage from './pages/OrderDetailsPage.jsx';
 import AdminDashboardPage from './pages/AdminDashboardPage.jsx';
+import Chatbot from './components/Chatbot.jsx';
 
 export default function App() {
   const [cart, setCart] = useState(null);
@@ -189,6 +190,7 @@ export default function App() {
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       <Footer />
+      <Chatbot products={products} currentUser={currentUser} />
       {cartOpen && (
         <CartDrawer
           cart={cart?.items ?? []}
